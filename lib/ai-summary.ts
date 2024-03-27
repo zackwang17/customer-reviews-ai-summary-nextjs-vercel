@@ -1,26 +1,26 @@
 import { unstable_cache } from "next/cache";
-import OpenAI from "openai";
-import { OpenAIStream, StreamingTextResponse } from "ai";
 import { Product } from "./types";
+import OpenAI from 'openai';
+import { OpenAIStream, StreamingTextResponse } from 'ai';
 
-if (!process.env.PERPLEXITY_API_KEY) {
-  throw new Error(
-    "PERPLEXITY_API_KEY environment variable is required. You can get this via https://vercel.com/docs/integrations/ai"
-  );
-}
-const perplexity = new OpenAI({
-  apiKey: process.env.PERPLEXITY_API_KEY || "",
-  baseURL: "https://api.perplexity.ai",
+// Create an OpenAI API client (that's edge friendly!)
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+  baseURL: process.env.OPENAI_BASE_URL
 });
+
+
+//IMPORTANT! Set the runtime to edge
+export const runtime = 'edge';
+
 
 export async function summarizeReviews(product: Product) {
   const averageRating =
     product.reviews.reduce((acc, review) => acc + review.stars, 0) /
     product.reviews.length;
 
-  const prompt = `Write a summary of the reviews for the ${
-    product.name
-  } product. The product's average rating is ${averageRating} out of 5 stars. 
+  const prompt = `Write a summary of the reviews for the ${product.name
+    } product. The product's average rating is ${averageRating} out of 5 stars. 
 Your goal is to highlight the most common themes and sentiments expressed by customers.
 If multiple themes are present, try to capture the most important ones.
 If no patterns emerge but there is a shared sentiment, capture that instead.
@@ -44,25 +44,18 @@ Hit the following tone based on rating:
 
 The customer reviews to summarize are as follows:
 ${product.reviews
-  .map((review, i) => `Review ${i + 1}:\n${review.review}`)
-  .join("\n\n")}`;
-
-  const query = {
-    model: "pplx-7b-chat",
-    stream: true,
-    messages: buildPrompt(prompt),
-    max_tokens: 1000,
-    temperature: 0.75,
-    top_p: 1,
-    frequency_penalty: 1,
-  } as const;
+      .map((review, i) => `Review ${i + 1}:\n${review.review}`)
+      .join("\n\n")}`;
 
   return unstable_cache(async () => {
-    const response = await perplexity.chat.completions.create(query);
+    const response = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      stream: true,
+      messages: buildPrompt(prompt),
+    });
 
-    // Convert the response into a friendly text-stream
+
     const stream = OpenAIStream(response);
-
     // Respond with the stream
     const streamingResponse = new StreamingTextResponse(stream);
     let text = await streamingResponse.text();
@@ -74,7 +67,7 @@ ${product.reviews
       .replace(/[\[\(]\d+ words[\]\)]/g, "");
     return text;
   }, [
-    JSON.stringify(query),
+    JSON.stringify(prompt),
     "1.0",
     process.env.VERCEL_BRANCH_URL || "",
     process.env.NODE_ENV || "",
